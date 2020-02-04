@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Canvas API Reports
 // @namespace    https://github.com/djm60546/canvas-api-reports
-// @version      1.1
-// @description  Script for extracting student and instructor behavior data using the Canvas API. Generates a .CSV download containing the data. Based on the Access Report Data script by James Jones.
+// @version      1.2
+// @description  Script for extracting student and instructor performance data using the Canvas API. Generates a .CSV download containing the data. Based on the Access Report Data script by James Jones.
 // @author       Dan Murphy, Northwestern University School of Professional Studies (dmurphy@northwestern.edu)
 // @match        https://canvas.northwestern.edu/accounts/*
 // @require      https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/1.3.3/FileSaver.js
@@ -37,12 +37,12 @@
     var tchrNameArray = [];
     var tchrEmailArray = [];
     var ajaxPool;
-    var aborted = false;
     var topics = {};
     var topicEntries = [];
     var topicIDs = [];
     var topicsIdx = 0;
     var controls = {};;
+    controls.aborted = false;
     controls.accessCount = 0;
     controls.accessIndex = 0;
     controls.anonStdnts = true; // Anonymize student names and IDs
@@ -75,7 +75,7 @@
     function errorHandler(e) {
         console.log(e.name + ': ' + e.message + 'at ' + e.stack);
         alert('An error occured. See browser console for details.');
-        //wrapup();
+        abortAll();
     }
 
     function abortAll() {
@@ -214,7 +214,7 @@
     }
 
     function processTopicEntries() {
-         $('#dm_report_status').text('Processing discussion topic entries...');
+         $('#capir_report_status').text('Processing discussion topic entries...');
         for (var i = 0; i < topicEntries.length; i++) {
             progressbar(i, topicEntries.length);
             var thisEntry = topicEntries[i];
@@ -239,11 +239,13 @@
 
      // Get the list of discussion topics for the current couurse
     function getTopicEntries(eURL) {
-         $('#dm_report_status').text('Getting discussion topic entries...');
+         $('#capir_report_status').text('Getting discussion topic entries...');
+        if (controls.aborted) {
+            console.log('Aborted at getTopicEntries');
+            return false;
+        }
         try {
-            if (aborted) {
-                throw new Error('Aborted at getTopicEntries');
-            }
+
             $.getJSON(eURL, function(eData, status, jqXHR) {
                 if (eData) {
                     for (var i = 0; i < eData.view.length; i++) {
@@ -294,11 +296,12 @@
     // Get the list of discussion topics for the current couurse
 
     function getTopics(tURL) {
+        $('#capir_report_status').text('Getting discussion topics...');
+        if (controls.aborted) {
+            console.log('Aborted at getTopics()');
+            return false;
+        }
         try {
-            if (aborted) {
-                throw new Error('Aborted');
-            }
-            $('#dm_report_status').text('Getting discussion topics...');
             $.getJSON(tURL, function(tData, status, jqXHR) {
                 tURL = nextURL(jqXHR.getResponseHeader('Link')); // Get next page of results, if any
                 if (tData) {
@@ -325,7 +328,7 @@
     }
 
     function processGrading() {
-        $('#dm_report_status').text('Processing submissions data...');
+        $('#capir_report_status').text('Processing submissions data...');
         var feedbackLen = 0;
         for (var i = 0; i < submissionData.length; i++) {
             progressbar(i, submissionData.length);
@@ -352,7 +355,6 @@
                 for (var j = 0; j < thisSubmission.submission_comments.length; j++) {
                     var thisAuthor = userData[thisSubmission.submission_comments[j].author_id];
                     if (typeof(thisAuthor) == 'undefined' || !thisAuthor) {continue} // Skip comments from students
-                    //console.log(thisSubmission.submission_comments[j]);
                     currCourse.feedback_count++;
                     var feedback = thisSubmission.submission_comments[j].comment;
                     feedbackLen += feedback.length;
@@ -371,7 +373,11 @@
 
     // Make At-risk list based on the status and quantity students' sumbmissions, discussion posts and current score
     function processAtRisk() {
-        $('#dm_report_status').text('Identifying at-risk students...');
+        $('#capir_report_status').text('Identifying at-risk students...');
+        if (controls.aborted) {
+            console.log('Aborted at processAtRisk()');
+            return false;
+        }
         progressbar(9, 10);
         for (var id in enrollmentData) {
             var thisEnrollment = enrollmentData[id];
@@ -403,7 +409,11 @@
     }
 
     function processStudentSubmissions() {
-        $('#dm_report_status').text('Processing submissions data...');
+        if (controls.aborted) {
+            console.log('Aborted at processStudentSubmissions()');
+            return false;
+        }
+        $('#capir_report_status').text('Processing submissions data...');
         progressbar(8, 10);
         for (var i = 0; i < submissionData.length; i++) {
             var thisSubmission = submissionData[i];
@@ -437,13 +447,16 @@
     }
 
     function getAssignments(dURL) {
-        $('#dm_report_status').text('Getting assignments data...');
+        $('#capir_report_status').text('Getting assignments data...');
+        if (controls.aborted) {
+            console.log('Aborted at getAssignments()');
+            return false;
+        }
         progressbar(7, 10);
-        // console.log('getAssignments');
         var discussions = 0;
         var assignments = 0;
         try {
-            $('#dm_report_status').text('Getting assignments data...');
+            $('#capir_report_status').text('Getting assignments data...');
             $.getJSON(dURL, function(ddata, status, jqXHR) { // Get assignments for the current course
                 dURL = nextURL(jqXHR.getResponseHeader('Link')); // Get next page or results, if any
                 for (var i = 0; i < ddata.length; i++) {
@@ -482,8 +495,12 @@
     }
 
     function getSubmissions(sURL) {
+        $('#capir_report_status').text('Getting submissions data...');
+        if (controls.aborted) {
+            console.log('Aborted at getSubmissions()');
+            return false;
+        }
         progressbar(5, 10);
-        $('#dm_report_status').text('Getting submissions data...');
         try {
             $.getJSON(sURL, function(sdata, status, jqXHR) {
                 sURL = nextURL(jqXHR.getResponseHeader('Link')); // Generate next page URL if more than 100 access records returned
@@ -498,7 +515,7 @@
                     getAssignments(dURL);
                 }
             }).fail(function() {
-                if (!aborted) {
+                if (!controls.aborted) {
                     var errorDetail = 'submissions,' + currCourse.id;
                     throw new Error(errorDetail);
                 }
@@ -526,7 +543,7 @@
     }
 
     function processAccesses() {
-        $('#dm_report_status').text('Processing user access data...');
+        $('#capir_report_status').text('Processing user access data...');
         for (var i = controls.accessIndex; i < accessData.length; i++) {
             var thisAccess = accessData[i];
             var userID = thisAccess.user_id;
@@ -561,7 +578,11 @@
     }
 
     function getAccesses(aURL) {
-        $('#dm_report_status').text('Getting user access data...');
+        $('#capir_report_status').text('Getting user access data...');
+        if (controls.aborted) {
+            console.log('Aborted at getAccesses()');
+            return false;
+        }
         try {
             $.getJSON(aURL, function(adata, status, jqXHR) {
                 aURL = nextURL(jqXHR.getResponseHeader('Link')); // Generate next page URL if more than 100 access records returned
@@ -588,7 +609,7 @@
                 }
             }).fail(function() {
                 controller('accesses');
-                if (!aborted) {
+                if (!controls.aborted) {
                     var errorDetail = 'access,' + controls.userArray[controls.userIndex] + ',' + currCourse.course_id;
                     throw new Error(errorDetail);
                 }
@@ -629,7 +650,7 @@
     }
 
     function processEnrollments() {
-        $('#dm_report_status').text('Processing user access data...');
+        $('#capir_report_status').text('Processing user access data...');
         progressbar(4, 10);
         var thisUserRole, nextFunction;
         for (var id in enrollmentData) {
@@ -675,14 +696,16 @@
 
     // Get enrollment data for users that is course-specific
     function getEnrollments() {
-        $('#dm_report_status').text('Getting enrollments data...');
+        $('#capir_report_status').text('Getting enrollments data...');
+        if (controls.aborted) {
+            console.log('Aborted at getEnrollments()');
+            return false;
+        }
         progressbar(3, 10);
-        var eURL = '/api/v1/courses/' + currCourse.course_id + '/enrollments?per_page=100';
-        eURL += controls.rptType == 'instructor' ? '&role[]=TeacherEnrollment' : '';
         try {
-            if (aborted) {
-                throw new Error('Aborted');
-            }
+
+            var eURL = '/api/v1/courses/' + currCourse.course_id + '/enrollments?per_page=100';
+            eURL += controls.rptType == 'instructor' ? '&role[]=TeacherEnrollment' : '';
             $.getJSON(eURL, function(edata, status, jqXHR) {
                 if (edata) {
                     for (var i = 0; i < edata.length; i++) {
@@ -704,7 +727,11 @@
 
     // Get the user data that is not course-specific
     function getUsers(uURL) {
-        $('#dm_report_status').text('Getting users data...');
+        $('#capir_report_status').text('Getting users data...');
+        if (controls.aborted) {
+            console.log('Aborted at getUsers()');
+            return false;
+        }
         progressbar(2, 10);
         try {
             $.getJSON(uURL, function(udata, status, jqXHR) { // Get users for the current course
@@ -731,13 +758,14 @@
 
     // Get course data one time to be applied to all users of the current course
     function getCourseData(crsID) {
-        $('#dm_report_status').text('Getting course data...');
+        $('#capir_report_status').text('Getting course data...');
+        if (controls.aborted) {
+            console.log('Aborted at getCourseData()');
+            return false;
+        }
         progressbar(1,10); // Reset progress bar
         try {
-            if (aborted) {
-                throw new Error('Aborted at getCourseData: Course Info');
-            }
-            $('#dm_report_status').text('Getting course data...');
+            $('#capir_report_status').text('Getting course data...');
             var urlCrs = '/api/v1/courses/' + crsID + '?include[]=total_students';
             $.getJSON(urlCrs, function(cdata, status, jqXHR) {
                 if (cdata) {
@@ -765,7 +793,7 @@
                         currCourse.feedback_count = 0;
                         currCourse.feedback_mean_length = 0;
                     }
-                    $('#dm_report_name').text(cdata.course_code);
+                    $('#capir_report_name').text(cdata.course_code);
                 }
             }).fail(function() {
                 var errorDetail = 'course,' + currCourse.course_id;
@@ -795,9 +823,7 @@
         var currCourseID;
         try {
             if (!controls.combinedRpt) { // Clear userData object if outputting a separate report for each course
-                for (var id in userData) {
-                    delete userData[id];
-                }
+                Object.keys(userData).forEach(function(key) { delete userData[key]; });
                 accessData = [];
                 atRiskArray = [];
                 controls.accessIndex = 0;
@@ -821,12 +847,12 @@
             submissionData = [];
             controls.userIndex = -1;
             controls.userArray = [];
-            accessData = [];
+            //accessData = [];
             controls.accessIndex = 0;
             if (controls.coursePending === 0) { // Output report if no more reports are pending
                 outputReport();
             }
-            aborted = false;
+            controls.aborted = false;
             controls.courseIndex = controls.courseArray.length - controls.coursePending;
             currCourseID = controls.courseArray[controls.courseIndex];
             progressbar(0,0); // Reset progress bar
@@ -839,10 +865,11 @@
     // Get the Canvas course IDs that match the user's search criteria
 
     function getCourseIds(crsURL) {
+        if (controls.aborted) {
+            console.log('Aborted at getCourseIds()');
+            return false;
+        }
         try {
-            if (aborted) {
-                throw new Error('Aborted');
-            }
             $.getJSON(crsURL, function(cdata, status, jqXHR) {
                 crsURL = nextURL(jqXHR.getResponseHeader('Link'));
                 if (cdata) {
@@ -875,15 +902,16 @@
                         wrapup();
                         return false;
                     }
-                    var runScriptDlg = 'The records from ' + controls.coursePending + ' courses will be processed. Continue?';
+                    var runScriptDlg = 'The records from ' + controls.coursePending + ' course(s) will be processed. Continue?';
                     if (confirm(runScriptDlg) == true) {
-                    makeNewReport(); // Get user accesses for each course selected
+                        progressbar(); // Display progress bar
+                        makeNewReport(); // Get user accesses for each course selected
                     } else {
                         wrapup();
                     }
                 }
             }).fail(function() {
-                var errorDetail = 'courses IDs';
+                var errorDetail = 'Error getting courses IDs';
                 throw new Error(errorDetail);
             });
         } catch (e) {
@@ -900,7 +928,6 @@
         document.body.style.cursor = "wait";
         controls.emptyCourse = false;
         setupPool();
-        progressbar();
         var cURL = '/api/v1/accounts/' + controls.canvasAcct + '/courses?with_enrollments=true' + enrollTermID + searchTrm + searchBy + '&per_page=100';
         getCourseIds(cURL);
     }
@@ -912,24 +939,24 @@
         var reportName = '';
         var rptDatesClean, rptDatesConcat;
         try {
-            if (aborted) {
-                console.log('Process aborted at makeReport');
-                aborted = false;
-                return;
+            if (controls.aborted) {
+                console.log('Process aborted at makeReport()');
+                controls.aborted = false;
+                return false;
             }
-            $('#dm_report_status').text('Compiling report...');
+            $('#capir_report_status').text('Compiling report...');
             var csv = createCSV();
             if (csv) {
                 var blob = new Blob([ csv ], {
                     'type' : 'text/csv;charset=utf-8'
                 });
                 if (controls.combinedRpt) {
-                    reportName = $("#dm_term_slct option:selected").val() == 0 ? '' : $("#dm_term_slct option:selected").text() + ' ';
-                    reportName += $('#dm_srch_inpt').val() == '' ? '' : $('#dm_srch_inpt').val().toUpperCase() + ' ';
+                    reportName = $("#capir_term_slct option:selected").val() == 0 ? '' : $("#capir_term_slct option:selected").text() + ' ';
+                    reportName += $('#capir_srch_inpt').val() == '' ? '' : $('#capir_srch_inpt').val().toUpperCase() + ' ';
                 } else {
                     reportName = currCourse.course_code + ' ';
                 }
-                reportName += $("#dm_report_slct option:selected").text();
+                reportName += $("#capir_report_slct option:selected").text();
                 if (controls.rptDateStartTxt != '') {
                     rptDatesConcat = controls.rptDateStartTxt + ' - ' + controls.rptDateEndTxt;
                     rptDatesClean = rptDatesConcat.replace(/\//g,'-'); // replace slashes with hyphens in dates for a vaild filename
@@ -1182,8 +1209,23 @@
             });
         }
         if (controls.rptType == 'participation') {
-           //fields.splice(6, 10);
-            //fields.splice(4, 1);
+            fields.splice(4, 11);
+            fields.splice(9, 0,
+               {
+                'name' : 'Canvas Course ID',
+                'src' : 'a.course_id',
+            }, {
+                'name' : 'SIS Course ID',
+                'src' : 'a.sis_course_id',
+            }, {
+                'name' : 'Canvas Term ID',
+                'src' : 'a.enrollment_term_id',
+            });
+            fields.push(
+                {
+                'name' : 'Name',
+                'src' : 'u.name'
+            });
         }
         var canSIS = false;
         for (var id in userData) {
@@ -1266,8 +1308,6 @@
                                 break;
                             case 'integer':
                                 value = integerVal(value);
-                                break;
-                            default:
                                 break;
                         }
                     }
@@ -1362,7 +1402,9 @@
 
     // Clear or reset objects, arrays and vars of all data, reset UI
     function wrapup() {
-        progressbar(); // Close progress bar
+        if ($('#capir_progress_dialog').dialog('isOpen')) {
+            $('#capir_progress_dialog').dialog('close');
+        }
         Object.keys(userData).forEach(function(key) { delete userData[key]; });
         Object.keys(currCourse).forEach(function(key) { delete currCourse[key]; });
         Object.keys(enrollmentData).forEach(function(key) { delete enrollmentData[key]; });
@@ -1370,7 +1412,7 @@
         submissionData = [];
         accessData = [];
         atRiskArray = [];
-        aborted = false;
+        controls.aborted = false;
         controls.accessCount = 0;
         controls.accessIndex = 0;
         controls.courseArray = [];
@@ -1385,7 +1427,7 @@
         controls.rptDateStartTxt = '';
         controls.rptDateEndTxt = '';
         document.body.style.cursor = "default"; // Restore default cursor
-        $('#jj_access_report').one('click', reportOptionsDlg); // Re-enable multi-reports button
+        $('#capir_access_report').one('click', reportOptionsDlg); // Re-enable multi-reports button
         if (controls.emptyCourse) {
             alert('Courses labeled as cancelled (SECX##) and those with no students enrolled have been omitted. See Console for a list of omitted courses.');
         }
@@ -1394,37 +1436,38 @@
     function progressbar(total, current) {
         try {
             if (typeof total === 'undefined' || typeof current == 'undefined') {
-                if ($('#jj_progress_dialog').length === 0) {
-                    $('body').append('<div id="jj_progress_dialog"></div>');
-                    $('#jj_progress_dialog').append('<div id="dm_report_name" style="font-size: 12pt; font-weight:bold"></div>');
-                    $('#jj_progress_dialog').append('<div id="jj_progressbar"></div>');
-                    $('#jj_progress_dialog').append('<div id="dm_report_status" style="font-size: 12pt; text-align: center"></div>');
-                    $('#jj_progress_dialog').dialog({
+                if ($('#capir_progress_dialog').length === 0) {
+                    $('body').append('<div id="capir_progress_dialog"></div>');
+                    $('#capir_progress_dialog').append('<div id="capir_report_name" style="font-size: 12pt; font-weight:bold"></div>');
+                    $('#capir_progress_dialog').append('<div id="capir_progressbar"></div>');
+                    $('#capir_progress_dialog').append('<div id="capir_report_status" style="font-size: 12pt; text-align: center"></div>');
+                    $('#capir_progress_dialog').dialog({
                         'title' : 'Fetching Canvas Data',
                         'autoOpen' : false,
                         'buttons' : [ {
                             'text' : 'Cancel',
                             'click' : function() {
                                 $(this).dialog('close');
-                                aborted = true;
+                                controls.aborted = true;
                                 abortAll();
-                                $('#jj_access_report').one('click', reportOptionsDlg);
+                                $('#capir_access_report').one('click', reportOptionsDlg);
                             }
-                        } ]
+                        }]
                     });
+                    $('.ui-dialog-titlebar-close').remove(); // Remove titlebar close button forcing users to form buttons
                 }
-                if ($('#jj_progress_dialog').dialog('isOpen')) {
-                    $('#jj_progress_dialog').dialog('close');
+                if ($('#capir_progress_dialog').dialog('isOpen')) {
+                    $('#capir_progress_dialog').dialog('close');
                 } else {
-                    $('#jj_progressbar').progressbar({
+                    $('#capir_progressbar').progressbar({
                         'value' : false
                     });
-                    $('#jj_progress_dialog').dialog('open');
+                    $('#capir_progress_dialog').dialog('open');
                 }
             } else {
-                if (!aborted) {
+                if (!controls.aborted) {
                     var val = current > 0 ? Math.round(100 * total / current) : false;
-                    $('#jj_progressbar').progressbar('option', 'value', val);
+                    $('#capir_progressbar').progressbar('option', 'value', val);
                 }
             }
         } catch (e) {
@@ -1435,47 +1478,47 @@
     function dateOptionsDlgResult(result) {
         var dS, hS, dE, hE;
         if (result) {
-            controls.rptDateStartTxt = $("#dm_start_date_txt").val();
-            controls.rptDateEndTxt = $("#dm_end_date_txt").val();
-            dS = Date.parse($("#dm_start_date_txt").val());
+            controls.rptDateStartTxt = $("#capir_start_date_txt").val();
+            controls.rptDateEndTxt = $("#capir_end_date_txt").val();
+            dS = Date.parse($("#capir_start_date_txt").val());
             hS = dS.setHours(0,0,0,0);
             controls.rptDateStart = hS;
-            dE = Date.parse($("#dm_end_date_txt").val());
+            dE = Date.parse($("#capir_end_date_txt").val());
             hE = dE.setHours(24,0,0,0);
             controls.rptDateEnd = hE;
-            $('#dm_date_range_p').html(controls.rptDateStartTxt + " - " + controls.rptDateEndTxt);
+            $('#capir_date_range_p').html(controls.rptDateStartTxt + " - " + controls.rptDateEndTxt);
         } else {
             controls.rptDateStart = 0;
             controls.rptDateEnd = 0;
             controls.rptDateStartTxt = '';
             controls.rptDateEndTxt = '';
-            $("#dm_rprt_prd_chbx").prop("checked",false);
-            $('#dm_date_range_p').html('');
+            $("#capir_rprt_prd_chbx").prop("checked",false);
+            $('#capir_date_range_p').html('');
         }
     }
 
     function showDateOptionsDlg() {
         try {
-            if ($('#dm_prtcptn_dts_dialog').length === 0) {
-                $('body').append('<div id="dm_prtcptn_dts_dialog"></div>');
-                $('#dm_prtcptn_dts_dialog').append('<p style="font-size: 1em">Select range of dates for zero participation.</p>');
-                $('#dm_prtcptn_dts_dialog').append('<form id="dm_prtcptn_dts_frm"></div>');
-                $('#dm_prtcptn_dts_frm').append('<fieldset id="dm_prtcptn_dts_fldst"></fieldset>');
-                $('#dm_prtcptn_dts_fldst').append('<label for="dm_start_date_txt">Start Date:</label>');
-                $('#dm_prtcptn_dts_fldst').append('<input type="text" id="dm_start_date_txt" name="dm_start_date_txt">');
-                $('#dm_prtcptn_dts_fldst').append('<label for="dm_end_date_txt">End Date:</label>');
-                $('#dm_prtcptn_dts_fldst').append('<input type="text" id="dm_end_date_txt" name="dm_end_date_txt">');
+            if ($('#capir_prtcptn_dts_dialog').length === 0) {
+                $('body').append('<div id="capir_prtcptn_dts_dialog"></div>');
+                $('#capir_prtcptn_dts_dialog').append('<p style="font-size: 1em">Select the range of dates for reporting.</p>');
+                $('#capir_prtcptn_dts_dialog').append('<form id="capir_prtcptn_dts_frm"></div>');
+                $('#capir_prtcptn_dts_frm').append('<fieldset id="capir_prtcptn_dts_fldst"></fieldset>');
+                $('#capir_prtcptn_dts_fldst').append('<label for="capir_start_date_txt">Start Date:</label>');
+                $('#capir_prtcptn_dts_fldst').append('<input type="text" id="capir_start_date_txt" name="capir_start_date_txt">');
+                $('#capir_prtcptn_dts_fldst').append('<label for="capir_end_date_txt">End Date:</label>');
+                $('#capir_prtcptn_dts_fldst').append('<input type="text" id="capir_end_date_txt" name="capir_end_date_txt">');
                 var enableDataPicker = $( function() {
-                    $( "#dm_start_date_txt" ).datepicker();
-                    $( "#dm_end_date_txt" ).datepicker();
+                    $( "#capir_start_date_txt" ).datepicker();
+                    $( "#capir_end_date_txt" ).datepicker();
                 } );
-                $('#dm_prtcptn_dts_dialog').dialog ({
+                $('#capir_prtcptn_dts_dialog').dialog ({
                     'title' : 'Specify Reporting Period',
                     'autoOpen' : false,
                     buttons : {
                         "OK": function () {
-                            var dS = Date.parse($("#dm_start_date_txt").val());
-                            var dE = Date.parse($( "#dm_end_date_txt").val());
+                            var dS = Date.parse($("#capir_start_date_txt").val());
+                            var dE = Date.parse($( "#capir_end_date_txt").val());
                             if (!(dS instanceof Date) || !(dE instanceof Date)) {
                                 alert('Enter valid start and end dates for the reporting period')
                                 return false;
@@ -1493,7 +1536,7 @@
                         }
                     }});
             }
-            $('#dm_prtcptn_dts_dialog').dialog('open');
+            $('#capir_prtcptn_dts_dialog').dialog('open');
         } catch (e) {
             return false;
             errorHandler(e);
@@ -1501,16 +1544,16 @@
     }
 
     function enableReportOptionsDlgOK() {
-        if (($("#dm_term_slct").val() != 0 || $("#dm_srch_inpt").val() != '') && $("#dm_report_slct").val() != 0) {
-            $('#dm_term_slct').closest(".ui-dialog").find("button:contains('OK')").removeAttr('disabled').removeClass( 'ui-state-disabled' );;
+        if (($("#capir_term_slct").val() != 0 || $("#capir_srch_inpt").val() != '') && $("#capir_report_slct").val() != 0) {
+            $('#capir_term_slct').closest(".ui-dialog").find("button:contains('OK')").removeAttr('disabled').removeClass( 'ui-state-disabled' );;
         } else {
-             $('#dm_term_slct').closest(".ui-dialog").find("button:contains('OK')").prop("disabled", true).addClass("ui-state-disabled");
+             $('#capir_term_slct').closest(".ui-dialog").find("button:contains('OK')").prop("disabled", true).addClass("ui-state-disabled");
         }
     }
 
     function reportOptionsDlg() {
         try {
-            if ($('#dm_options_frm').length === 0) {
+            if ($('#capir_options_frm').length === 0) {
                 // Update this array with new Canvas term IDs and labels as quarters/terms are added
                 // Populates the term select menu in the "Select Report Options" dialog box
                 var terms = {data:[
@@ -1562,114 +1605,114 @@
                     {val : 'participation', txt: 'Zero Participation'},
                 ]};
                 // Define "Select Report Options" dialog box
-                $('body').append('<div id="dm_options_dialog"></div>');
-                $('#dm_options_dialog').append('<form id="dm_options_frm"></div>');
-                $('#dm_options_frm').append('<fieldset id="dm_options_fldst"></fieldset>');
-                $('#dm_options_fldst').append('<select id="dm_term_slct">');
-                $('#dm_options_fldst').append('<br/>');
-                $('#dm_options_fldst').append('<input type="radio" name="dm_srch_rdo" id="coursename" value="true" checked="checked">');
-                $('#dm_options_fldst').append('<label for="coursename">&nbsp;Course Name</label>');
-                $('#dm_options_fldst').append('<br/>');
-                $('#dm_options_fldst').append('<input type="radio" name="dm_srch_rdo" id="instructorname" value="false">');
-                $('#dm_options_fldst').append('<label for="instructorname">&nbsp;Instructor Name</label>');
-                $('#dm_options_fldst').append('<br/>');
-                $('#dm_options_fldst').append('<label for="dm_srch_inpt">Search text:</label>');
-                $('#dm_options_fldst').append('<input type="text" id="dm_srch_inpt" name="dm_srch_inpt">');
-                $('#dm_options_fldst').append('<hr/>');
-                $('#dm_options_fldst').append('<select id="dm_report_slct">');
-                $('#dm_options_fldst').append('<br/>');
-                $('#dm_options_fldst').append('<input type="radio" name="dm_report_opts" id="single" value="true" checked="checked">');
-                $('#dm_options_fldst').append('<label for="single">&nbsp;Single report (all selected courses)</label>');
-                $('#dm_options_fldst').append('<br/>');
-                $('#dm_options_fldst').append('<input type="radio" name="dm_report_opts" id="multiple" value="false">');
-                $('#dm_options_fldst').append('<label for="multiple">&nbsp;Multiple reports (individual courses)</label>');
-                $('#dm_options_fldst').append('<hr/>');
-                $('#dm_options_fldst').append('<input type="checkbox" id="dm_dl_crs_chbx" name="dm_dl_crs_chbx" value="true" checked>');
-                $('#dm_options_fldst').append('<label for="dm_dl_crs_chbx">&nbsp;Online courses only</label>');
-                $('#dm_options_fldst').append('<br/>');
-                $('#dm_options_fldst').append('<input type="checkbox" id="dm_anon_stdnt_chbx" name="dm_anon_stdnt_chbx" value="true" checked>');
-                $('#dm_options_fldst').append('<label for="dm_anon_stdnt_chbx">&nbsp;Anonymize students</label>');
-                $('#dm_options_fldst').append('<br/>');
-                $('#dm_options_fldst').append('<input type="checkbox" id="dm_rprt_prd_chbx" name="dm_rprt_prd_chbx" value="true">');
-                $('#dm_options_fldst').append('<label for="dm_rprt_prd_chbx">&nbsp;Specify reporting period</label>');
-                $('#dm_options_fldst').append('<br/>');
-                $('#dm_options_fldst').append('<span id="dm_date_range_p" style="font-size: 1em; margin-left: 1.75em"></span>');
-                $("#dm_term_slct").change(function() {
+                $('body').append('<div id="capir_options_dialog"></div>');
+                $('#capir_options_dialog').append('<form id="capir_options_frm"></div>');
+                $('#capir_options_frm').append('<fieldset id="capir_options_fldst"></fieldset>');
+                $('#capir_options_fldst').append('<select id="capir_term_slct">');
+                $('#capir_options_fldst').append('<br/>');
+                $('#capir_options_fldst').append('<input type="radio" name="capir_srch_rdo" id="coursename" value="true" checked="checked">');
+                $('#capir_options_fldst').append('<label for="coursename">&nbsp;Course Name</label>');
+                $('#capir_options_fldst').append('<br/>');
+                $('#capir_options_fldst').append('<input type="radio" name="capir_srch_rdo" id="instructorname" value="false">');
+                $('#capir_options_fldst').append('<label for="instructorname">&nbsp;Instructor Name</label>');
+                $('#capir_options_fldst').append('<br/>');
+                $('#capir_options_fldst').append('<label for="capir_srch_inpt">Search text:</label>');
+                $('#capir_options_fldst').append('<input type="text" id="capir_srch_inpt" name="capir_srch_inpt">');
+                $('#capir_options_fldst').append('<hr/>');
+                $('#capir_options_fldst').append('<select id="capir_report_slct">');
+                $('#capir_options_fldst').append('<br/>');
+                $('#capir_options_fldst').append('<input type="radio" name="capir_report_opts" id="single" value="true" checked="checked">');
+                $('#capir_options_fldst').append('<label for="single">&nbsp;Single report (all selected courses)</label>');
+                $('#capir_options_fldst').append('<br/>');
+                $('#capir_options_fldst').append('<input type="radio" name="capir_report_opts" id="multiple" value="false">');
+                $('#capir_options_fldst').append('<label for="multiple">&nbsp;Multiple reports (individual courses)</label>');
+                $('#capir_options_fldst').append('<hr/>');
+                $('#capir_options_fldst').append('<input type="checkbox" id="capir_dl_crs_chbx" name="capir_dl_crs_chbx" value="true" checked>');
+                $('#capir_options_fldst').append('<label for="capir_dl_crs_chbx">&nbsp;Online courses only</label>');
+                $('#capir_options_fldst').append('<br/>');
+                $('#capir_options_fldst').append('<input type="checkbox" id="capir_anon_stdnt_chbx" name="capir_anon_stdnt_chbx" value="true" checked>');
+                $('#capir_options_fldst').append('<label for="capir_anon_stdnt_chbx">&nbsp;Anonymize students</label>');
+                $('#capir_options_fldst').append('<br/>');
+                $('#capir_options_fldst').append('<input type="checkbox" id="capir_rprt_prd_chbx" name="capir_rprt_prd_chbx" value="true">');
+                $('#capir_options_fldst').append('<label for="capir_rprt_prd_chbx">&nbsp;Specify reporting period</label>');
+                $('#capir_options_fldst').append('<br/>');
+                $('#capir_options_fldst').append('<span id="capir_date_range_p" style="font-size: 1em; margin-left: 1.75em"></span>');
+                $("#capir_term_slct").change(function() {
                     enableReportOptionsDlgOK();
                 });
-                $("#dm_srch_inpt").change(function() {
+                $("#capir_srch_inpt").change(function() {
                     enableReportOptionsDlgOK();
                 });
-                $("#dm_report_slct").change(function() {
+                $("#capir_report_slct").change(function() {
                     if ($(this).children("option:selected").val() == 'participation')
                     {
-                        $("#dm_anon_stdnt_chbx").prop("checked",false);
-                        $("#dm_anon_stdnt_chbx").prop("disabled",true);
-                        $("#dm_rprt_prd_chbx").prop("checked",true);
-                        $("#dm_rprt_prd_chbx").prop("disabled",true);
+                        $("#capir_anon_stdnt_chbx").prop("checked",false);
+                        $("#capir_anon_stdnt_chbx").prop("disabled",true);
+                        $("#capir_rprt_prd_chbx").prop("checked",true);
+                        $("#capir_rprt_prd_chbx").prop("disabled",false);
                         showDateOptionsDlg();
                     }
                     else if ($(this).children("option:selected").val() == 'at-risk' || $(this).children("option:selected").val() == 'instructor')
                     {
-                        $("#dm_anon_stdnt_chbx").prop("checked",false);
-                        $("#dm_anon_stdnt_chbx").prop("disabled",true);
-                         $("#dm_rprt_prd_chbx").prop("disabled",false);
+                        $("#capir_anon_stdnt_chbx").prop("checked",false);
+                        $("#capir_anon_stdnt_chbx").prop("disabled",true);
+                         $("#capir_rprt_prd_chbx").prop("disabled",false);
                     }
                     else {
-                        controls.rptDateStart = null;
-                        controls.rptDateEnd = null;
-                        $("#dm_anon_stdnt_chbx").prop("disabled",false);
-                        $("#dm_rprt_prd_chbx").prop("disabled",false);
-                        $("#dm_rprt_prd_chbx").prop("checked",false);
-                        $('#dm_date_range_p').html('');
+                        controls.rptDateStart = 0;
+                        controls.rptDateEnd = 0;
+                        $("#capir_anon_stdnt_chbx").prop("disabled",false);
+                        $("#capir_rprt_prd_chbx").prop("disabled",false);
+                        $("#capir_rprt_prd_chbx").prop("checked",false);
+                        $('#capir_date_range_p').html('');
                     }
                     enableReportOptionsDlgOK();
                 });
-                $("#dm_rprt_prd_chbx").change(function() {
+                $("#capir_rprt_prd_chbx").change(function() {
                     controls.rptDateStart = 0;
                     controls.rptDateEnd = 0;
                     if($(this).is(":checked"))
                     {
                         showDateOptionsDlg();
                     } else {
-                        $('#dm_date_range_p').html('');
+                        $('#capir_date_range_p').html('');
                     }
                 });
-                $('#dm_options_dialog').dialog ({
+                $('#capir_options_dialog').dialog ({
                     'title' : 'Select Report Options',
-                    'autoOpen' : false,
                     'modal' : true,
+                    'autoOpen' : false,
                     'buttons' : {
                         "OK": function () {
                             $(this).dialog("close");
-                            var enrllTrmSelct = $("#dm_term_slct option:selected").val();
-                            var srchByChecked = $("input[name='dm_srch_rdo']:checked").val();
-                            var srchTermsStr = $("#dm_srch_inpt").val();
-                            controls.rptType = $('#dm_report_slct').children("option:selected").val();
-                            controls.combinedRpt = $("input[name='dm_report_opts']:checked").val()
-                            controls.dlCrsOnly = $('#dm_dl_crs_chbx').prop('checked');
-                            controls.anonStdnts = $('#dm_anon_stdnt_chbx').prop('checked');
+                            var enrllTrmSelct = $("#capir_term_slct option:selected").val();
+                            var srchByChecked = $("input[name='capir_srch_rdo']:checked").val();
+                            var srchTermsStr = $("#capir_srch_inpt").val();
+                            controls.rptType = $('#capir_report_slct').children("option:selected").val();
+                            controls.combinedRpt = $("input[name='capir_report_opts']:checked").val()
+                            controls.dlCrsOnly = $('#capir_dl_crs_chbx').prop('checked');
+                            controls.anonStdnts = $('#capir_anon_stdnt_chbx').prop('checked');
                             setupReports(enrllTrmSelct, srchByChecked, srchTermsStr);
                         },
                         "Cancel": function () {
                             $(this).dialog('close');
-                            $('#jj_access_report').one('click', reportOptionsDlg);
+                            $('#capir_access_report').one('click', reportOptionsDlg);
                         }
                     }});
                 $('.ui-dialog-titlebar-close').remove(); // Remove titlebar close button forcing users to form buttons
-                $('#dm_term_slct').closest(".ui-dialog").find("button:contains('OK')").prop("disabled", true).addClass("ui-state-disabled");
-                if ($('#dm_term_slct').children('option').length === 0) { // add terms to terms select element
+                $('#capir_term_slct').closest(".ui-dialog").find("button:contains('OK')").prop("disabled", true).addClass("ui-state-disabled");
+                if ($('#capir_term_slct').children('option').length === 0) { // add terms to terms select element
                     $.each(terms.data, function (key, value) {
-                        $("#dm_term_slct").append($('<option>', {
+                        $("#capir_term_slct").append($('<option>', {
                             value: value.val,
                             text: value.txt,
                             'data-mark': value.id
                         }));
                     });
                 }
-                if ($('#dm_report_slct').children('option').length === 0) { // add report types to reports select element
+                if ($('#capir_report_slct').children('option').length === 0) { // add report types to reports select element
                     $.each(reports.data, function (key, value) {
-                        $("#dm_report_slct").append($('<option>', {
+                        $("#capir_report_slct").append($('<option>', {
                             value: value.val,
                             text: value.txt,
                             'data-mark': value.id
@@ -1677,24 +1720,25 @@
                     });
                 }
             }
-            //$('#dm_options_dialog').css('z-index', '9000');
-            $('#dm_options_dialog').dialog('open');
+            //$('#capir_options_dialog').css('z-index', '9000');
+            $('#capir_options_dialog').dialog('open');
         } catch (e) {
             errorHandler(e);
         }
     }
 
-    // Add "Multi-Course Access Reports" button below navigation
+    // Add "Custom API Reports" link below navigation
     function addReportsLink() {
-        if ($('#jj_access_report').length === 0) {
-            $('#left-side').append('<div class="rs-margin-bottom"><a id="jj_access_report"><span aria-hidden="true" style="color:#f92626; cursor: pointer; display: block; font-size: 1rem; line-height: 20px; margin: 5px auto; padding: 8px 0px 8px 6px;">Custom API Reports</span><span class="screenreader-only">Custom API Reports</span></a></div>');
-            $('#jj_access_report').one('click', reportOptionsDlg);
+        if ($('#capir_access_report').length === 0) {
+            $('#left-side').append('<div class="rs-margin-bottom"><a id="capir_access_report"><span aria-hidden="true" style="color:#f92626; cursor: pointer; display: block; font-size: 1rem; line-height: 20px; margin: 5px auto; padding: 8px 0px 8px 6px;">Custom API Reports</span><span class="screenreader-only">Custom API Reports</span></a></div>');
+            //$('#capir_access_report').one('click', reportOptionsDlg);
+            $('#capir_access_report').one('click', reportOptionsDlg);
         }
         return;
     }
 
-    $( document ).ready(function() {
+    $(document).ready(function() {
         addReportsLink(); // Add reports link to page
     });
-
+        $.noConflict(true);
 }());
