@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Canvas API Reports
 // @namespace    https://github.com/djm60546/canvas-api-reports
-// @version      1.2
+// @version      1.4
 // @description  Script for extracting student and instructor performance data using the Canvas API. Generates a .CSV download containing the data. Based on the Access Report Data script by James Jones.
 // @author       Dan Murphy, Northwestern University School of Professional Studies (dmurphy@northwestern.edu)
 // @match        https://canvas.northwestern.edu/accounts/*
@@ -421,7 +421,7 @@
             var thisEnrollment = enrollmentData[getEnrollmentID(userID)];
             var thisAssignment = assignmentData[thisSubmission.assignment_id];
             if ((typeof(thisEnrollment) != 'undefined' && thisEnrollment) && (typeof(thisAssignment) != 'undefined' && thisAssignment)) {
-                if (thisSubmission.workflow_state != 'unsubmitted'){
+                if (thisSubmission.workflow_state != 'unsubmitted' && thisSubmission.missing == false){
                     var submitted = thisEnrollment.submitted + 1;
                     thisEnrollment.submitted = submitted;
                 }
@@ -876,15 +876,16 @@
                     for (var i = 0; i < cdata.length; i++) {
                         var thisCourse = cdata[i];
                         var goodURL = true;
-                        var crsNameStr = thisCourse.name;
+                        var crsNameStr = thisCourse.course_code;
                         var dlPttrn = /-DL_/;
                         var dlStatus = dlPttrn.test(crsNameStr); // Check if a course is online by the -DL_ pattern in link text
                         if ((controls.dlCrsOnly && dlStatus) || !controls.dlCrsOnly) { // Add courses to the list; either online only or all
                             var cncldPttrn = /_SECX\d\d/;
-                            var cncldStatus = cncldPttrn.test(crsNameStr); // Check if current course is cancelled with "_SECX " in the course name
-                            if (!cncldStatus) { // Add only courses without "_SECX " in their names
-                                controls.courseArray.push(thisCourse.id);
-                            }
+                            var cncldStatus = cncldPttrn.test(crsNameStr); // Check if current course is cancelled with "_SECX[two digits]" in the course name
+                            var sndbxPttrn = /^CCS_/;
+                            var sndbxStatus = sndbxPttrn.test(crsNameStr); // Check if current course is a sandbox with a name starting with "CCS_"
+                            if (cncldStatus || sndbxStatus) {continue} // Do not include cancelled or sandbox courses
+                            controls.courseArray.push(thisCourse.id);
                             if (cncldStatus) {
                                 console.log(thisCourse.name + ' - Cancelled');
                                 controls.emptyCourse = true;
@@ -911,7 +912,7 @@
                     }
                 }
             }).fail(function() {
-                var errorDetail = 'Error getting courses IDs';
+                var errorDetail = 'Error getting course IDs';
                 throw new Error(errorDetail);
             });
         } catch (e) {
@@ -1558,6 +1559,8 @@
                 // Populates the term select menu in the "Select Report Options" dialog box
                 var terms = {data:[
                     {val : 0, txt: 'Select a term'},
+                    {val : 168, txt: '2020 Fall'},
+                    {val : 167, txt: '2020-2021 Academic Year'},
                     {val : 166, txt: '2020 Summer'},
                     {val : 165, txt: '2020 Spring'},
                     {val : 164, txt: '2020 Winter'},
@@ -1656,7 +1659,18 @@
                     {
                         $("#capir_anon_stdnt_chbx").prop("checked",false);
                         $("#capir_anon_stdnt_chbx").prop("disabled",true);
-                         $("#capir_rprt_prd_chbx").prop("disabled",false);
+                        $("#capir_rprt_prd_chbx").prop("disabled",false);
+                    }
+                     else if ($(this).children("option:selected").val() == 'access')
+                    {
+                        $("#capir_anon_stdnt_chbx").prop("disabled",false);
+                        controls.rptDateStart = 0;
+                        controls.rptDateEnd = 0;
+                        controls.rptDateStartTxt = '';
+                        controls.rptDateEndTxt = '';
+                        $("#capir_rprt_prd_chbx").prop("disabled",true);
+                        $("#capir_rprt_prd_chbx").prop("checked",false);
+                        $('#capir_date_range_p').html('');
                     }
                     else {
                         controls.rptDateStart = 0;
@@ -1740,5 +1754,5 @@
     $(document).ready(function() {
         addReportsLink(); // Add reports link to page
     });
-        $.noConflict(true);
+    $.noConflict(true);
 }());
