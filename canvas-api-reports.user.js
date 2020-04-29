@@ -40,8 +40,7 @@
     var topics = {};
     var topicEntries = [];
     var topicIDs = [];
-    var topicsIdx = 0;
-    var controls = {};;
+    var controls = {};
     controls.aborted = false;
     controls.accessCount = 0;
     controls.accessIndex = 0;
@@ -60,6 +59,7 @@
     controls.rptDateStartTxt = '';
     controls.rptDateEndTxt = '';
     controls.rptType = 'none';
+    controls.topicsIdx = 0;
     controls.userArray = [];
     controls.userIndex = 0;
     controls.atRisk = {};
@@ -102,6 +102,7 @@
     }
 
     function setupPool() {
+        // console.log('setupPool');
         try {
             ajaxPool = [];
             $.ajaxSetup({
@@ -122,6 +123,7 @@
 
     // Add current course data to a resource access or enrollment object
     function addCourseData(obj) {
+        // console.log('addCourseData');
         obj.sis_course_id = currCourse.sis_course_id;
         obj.course_code = currCourse.course_code;
         obj.course_id = currCourse.course_id;
@@ -144,7 +146,10 @@
         }
     }
 
+    // Returns the correct enrollment ID by matching it to the current course and user.
+    // Otherwise, students enrolled in multiple sections would match on the first occurance, resulting in errors
     function getEnrollmentID(userID) {
+        // console.log('getEnrollmentID');
         var enrollementID;
         for (var id in enrollmentData) {
             var enrollment = enrollmentData[id];
@@ -157,17 +162,10 @@
     }
 
     function controller(state) {
+        // console.log('controller - ' + state);
         var sURL, aURL;
-        controls.userIndex++;
+        if (state == 'accesses' || state == 'enrollments_done') {controls.userIndex++}
         switch (state) {
-            case 'accesses':
-                if (controls.userIndex >= controls.userArray.length) {
-                    processAccesses();
-                } else {
-                    aURL = '/courses/' + currCourse.course_id + '/users/' + controls.userArray[controls.userIndex] + '/usage.json?per_page=100';
-                    getAccesses(aURL);
-                }
-                break;
             case 'course_done':
                 progressbar(10, 10);
                 controls.coursePending--;
@@ -179,41 +177,56 @@
                 break;
             case 'enrollments_done':
                 if (controls.rptType == 'access' || controls.rptType == 'at-risk' || controls.rptType == 'instructor') {
-                    progressbar(0,controls.accessCount);
                     aURL = '/courses/' + currCourse.course_id + '/users/' + controls.userArray[controls.userIndex] + '/usage.json?per_page=100';
                     getAccesses(aURL);
-                } else {
-                    sURL = 'https://canvas.northwestern.edu/api/v1/courses/' + currCourse.course_id + '/students/submissions?student_ids[]=all&per_page=100';
-                    getSubmissions(sURL);
-                }
-                break;
-            case 'submissions':
-                if (submissionData.length > 0) {
-                    processStudentSubmissions();
                 } else {
                     sURL = 'https://canvas.northwestern.edu/api/v1/courses/' + currCourse.course_id + '/students/submissions?student_ids[]=all&per_page=100';
                     sURL += controls.rptType == 'instructor' ? '&include[]=submission_comments' : '';
                     getSubmissions(sURL);
                 }
                 break;
+            case 'accesses':
+                if (controls.userIndex >= controls.userArray.length) {
+                    processAccesses();
+                } else {
+                    progressbar(controls.userIndex,controls.userArray.length);
+                    aURL = '/courses/' + currCourse.course_id + '/users/' + controls.userArray[controls.userIndex] + '/usage.json?per_page=100';
+                    getAccesses(aURL);
+                }
+                break;
+            case 'submissions':
+                sURL = 'https://canvas.northwestern.edu/api/v1/courses/' + currCourse.course_id + '/students/submissions?student_ids[]=all&per_page=100';
+                sURL += controls.rptType == 'instructor' ? '&include[]=submission_comments' : '';
+                getSubmissions(sURL);
+                break;
             case 'topics':
                 var tURL = '/api/v1/courses/' + currCourse.course_id + '/discussion_topics?per_page=100';
                 getTopics(tURL);
+                break;
+            case 'topic_entries':
+                if (controls.topicsIdx >= topicIDs.length) {
+                    processTopicEntries();
+                } else {
+                    progressbar(controls.topicsIdx, topicIDs.length);
+                    var currTopicID = topicIDs[controls.topicsIdx];
+                    var eURL = '/api/v1/courses/' + currCourse.course_id + '/discussion_topics/' + currTopicID + '/view?per_page=100';
+                    getTopicEntries(eURL,currTopicID);
+                    controls.topicsIdx++;
+                }
                 break;
             case 'instructor':
                 for (var id in enrollmentData) {
                     var thisEnrollment = enrollmentData[id];
                     addCourseData(thisEnrollment);
                     instructorData.push(thisEnrollment);
-                    //delete enrollmentData[user_id];
                 }
                 controller('course_done');
                 break;
-
         }
     }
 
     function processTopicEntries() {
+        // console.log('processTopicEntries');
          $('#capir_report_status').text('Processing discussion topic entries...');
         for (var i = 0; i < topicEntries.length; i++) {
             progressbar(i, topicEntries.length);
@@ -221,9 +234,14 @@
             var userID = thisEntry.user_id
             var thisEnrollment = enrollmentData[getEnrollmentID(userID)];
             if (typeof(thisEnrollment) != 'undefined') { // omit entries from missing or non-teacher enrollments;  && thisEnrollment
+                // If reporting period indicated, get only those entries posted within the reporting period
+                var entryDate = new Date(thisEntry.updated_at);
+                var entryDateMS = entryDate.getTime();
+                if (controls.rptDateStart > 0 && (entryDateMS >= controls.rptDateStart && entryDateMS <= controls.rptDateEnd)) {continue}
                 var discussionCount = thisEnrollment.discussion_posts + 1;
                 thisEnrollment.discussion_posts = discussionCount;
-                var postChars = thisEnrollment.post_chars + thisEntry.message.length;
+                var cleanMessage = thisEntry.message.replace(/<(.|\n)*?>/g, ''); // Delete HTML tags in discussion posts for a more accurate character count
+                var postChars = thisEnrollment.post_chars + cleanMessage.length;
                 thisEnrollment.post_chars = postChars;
                 var meanPostLength = postChars / discussionCount;
                 thisEnrollment.post_mean_length = meanPostLength;
@@ -231,7 +249,7 @@
                 var thisUpdateMS = thisUpdate.getTime();
                 var lastPost = new Date(thisEnrollment.last_post_date);
                 var lastPostMS = lastPost.getTime();
-                if (thisUpdateMS > lastPostMS) {thisEnrollment.last_post_date = thisEntry.updated_at} // get most recent resource access
+                if (thisUpdateMS > lastPostMS) {thisEnrollment.last_post_date = thisEntry.updated_at} // get most recent post date for all discussions
             }
         }
         controller('instructor');
@@ -239,6 +257,7 @@
 
      // Get the list of discussion topics for the current couurse
     function getTopicEntries(eURL) {
+         // console.log('getTopicEntries');
          $('#capir_report_status').text('Getting discussion topic entries...');
         if (controls.aborted) {
             console.log('Aborted at getTopicEntries');
@@ -249,13 +268,8 @@
             $.getJSON(eURL, function(eData, status, jqXHR) {
                 if (eData) {
                     for (var i = 0; i < eData.view.length; i++) {
-                        progressbar(i, eData.view.length);
                         var thisEntry = eData.view[i];
                         if (thisEntry.hasOwnProperty('deleted') || !thisEntry.hasOwnProperty('message')) {continue} // omit deleted entries
-                        // If reporting period indicated, get only those entries posted within the reporting period
-                        var entryDate = new Date(thisEntry.updated_at);
-                        var entryDateMS = entryDate.getTime();
-                        if (controls.rptDateStart > 0 && (entryDateMS >= controls.rptDateStart && entryDateMS <= controls.rptDateEnd)) {continue}
                         topicEntries.push(thisEntry);
                           if (thisEntry.replies) {
                             var entryReplies = thisEntry.replies;
@@ -270,32 +284,20 @@
                     }
                 }
             }).done(function () {
-                getTopicEntryController();
+               controller('topic_entries');
             }).fail(function() {
                 var errorDetail = 'Topic entries query for course ' + currCourse.course_id + ' threw an error';
                 throw new Error(errorDetail);
-                //controller(courseId);
             });
         } catch (e) {
             errorHandler(e);
         }
     }
 
-    function getTopicEntryController() {
-        if (topicsIdx >= topicIDs.length) {
-            processTopicEntries();
-        } else {
-            progressbar(topicsIdx, topicIDs.length);
-            var currTopicID = topicIDs[topicsIdx];
-            var eURL = '/api/v1/courses/' + currCourse.course_id + '/discussion_topics/' + currTopicID + '/view?per_page=100';
-            getTopicEntries(eURL,currTopicID);
-            topicsIdx++;
-        }
-    }
-
     // Get the list of discussion topics for the current couurse
 
     function getTopics(tURL) {
+         // console.log('getTopics');
         $('#capir_report_status').text('Getting discussion topics...');
         if (controls.aborted) {
             console.log('Aborted at getTopics()');
@@ -316,7 +318,7 @@
                 if (tURL) {
                     getTopics(tURL)
                 } else {
-                getTopicEntryController();
+                controller('topic_entries');
                 }
             }).fail(function() {
                 var errorDetail = 'Topics query for course ' + currCourse.course_id + ' threw an error';
@@ -328,7 +330,8 @@
     }
 
     function processGrading() {
-        $('#capir_report_status').text('Processing submissions data...');
+        // console.log('processGrading');
+        $('#capir_report_status').text('Totaling scores and late/missing assignments...');
         var feedbackLen = 0;
         for (var i = 0; i < submissionData.length; i++) {
             progressbar(i, submissionData.length);
@@ -378,7 +381,6 @@
             console.log('Aborted at processAtRisk()');
             return false;
         }
-        progressbar(9, 10);
         for (var id in enrollmentData) {
             var thisEnrollment = enrollmentData[id];
             if (thisEnrollment.role != 'Student') {continue}
@@ -388,6 +390,7 @@
             var late = thisEnrollment.assignments_late;
             var missing = thisEnrollment.assignments_missing;
             var score = thisEnrollment.grades.current_score;
+
             if (controls.rptType == 'at-risk') {
                 if (late > controls.atRisk.late || missing > controls.atRisk.mssg || time === controls.atRisk.time || posts === controls.atRisk.posts || score == controls.atRisk.scoreRaw || submissions === controls.atRisk.sbmssn) {
                     thisEnrollment.current_score = score < controls.atRisk.scoreRaw ? 'Low' : 'OK';
@@ -396,26 +399,24 @@
                     addCourseData(thisEnrollment); // Add current course data to only those enrollments that will be reported
                     atRiskArray.push(thisEnrollment);
                 }
-            } else {
-                if (submissions === 0) { // Zero participation criteria
-                    thisEnrollment.submitted = ' ' + submissions + ' / ' + currCourse.assignments_due;
-                    addCourseData(thisEnrollment); // Add current course data to only those enrollments that will be reported
-                    atRiskArray.push(thisEnrollment);
-                }
-
+            } else if (controls.rptType == 'participation' && submissions === 0) { // Zero participation criteria
+                thisEnrollment.submitted = ' ' + submissions + ' / ' + currCourse.assignments_due;
+                addCourseData(thisEnrollment); // Add current course data to only those enrollments that will be reported
+                atRiskArray.push(thisEnrollment);
             }
         }
         controller('course_done');
     }
 
     function processStudentSubmissions() {
+       // console.log('processStudentSubmissions');
         if (controls.aborted) {
             console.log('Aborted at processStudentSubmissions()');
             return false;
         }
         $('#capir_report_status').text('Processing submissions data...');
-        progressbar(8, 10);
         for (var i = 0; i < submissionData.length; i++) {
+            progressbar(i, submissionData.length);
             var thisSubmission = submissionData[i];
             var userID = thisSubmission.user_id;
             var thisEnrollment = enrollmentData[getEnrollmentID(userID)];
@@ -435,7 +436,7 @@
                     var late = thisEnrollment.assignments_late + 1;
                     thisEnrollment.assignments_late = late;
                 }
-                if (thisSubmission.missing == true && thisSubmission.workflow_state == 'unsubmitted') {
+                if (thisSubmission.missing == true && (thisSubmission.workflow_state == 'unsubmitted' || thisSubmission.entered_grade == "0")) {
                     var missing = thisEnrollment.assignments_missing + 1;
                     var timeMissing = thisSubmission.seconds_late;
                     if (timeMissing > thisEnrollment.max_days_missing) {thisEnrollment.max_days_missing = timeMissing}
@@ -447,12 +448,11 @@
     }
 
     function getAssignments(dURL) {
-        $('#capir_report_status').text('Getting assignments data...');
+        // console.log('getAssignments');
         if (controls.aborted) {
             console.log('Aborted at getAssignments()');
             return false;
         }
-        progressbar(7, 10);
         var discussions = 0;
         var assignments = 0;
         try {
@@ -460,6 +460,7 @@
             $.getJSON(dURL, function(ddata, status, jqXHR) { // Get assignments for the current course
                 dURL = nextURL(jqXHR.getResponseHeader('Link')); // Get next page or results, if any
                 for (var i = 0; i < ddata.length; i++) {
+                    progressbar(i, ddata.length);
                     var thisAssignment = ddata[i];
                     var due = new Date(thisAssignment.due_at);
                     var dueMS = due.getTime();
@@ -495,16 +496,17 @@
     }
 
     function getSubmissions(sURL) {
+         // console.log('getSubmissions');
         $('#capir_report_status').text('Getting submissions data...');
         if (controls.aborted) {
             console.log('Aborted at getSubmissions()');
             return false;
         }
-        progressbar(5, 10);
         try {
             $.getJSON(sURL, function(sdata, status, jqXHR) {
                 sURL = nextURL(jqXHR.getResponseHeader('Link')); // Generate next page URL if more than 100 access records returned
                 for (var i = 0; i < sdata.length; i++) {
+                    progressbar(i, sdata.length);
                     submissionData.push(sdata[i]);
                 }
             }).done(function() {
@@ -526,6 +528,7 @@
     }
 
     function writeNoAccesses(obj) {
+        console.log('writeNoAccesses');
         var nonAccess = {
             'role' : obj.role,
             'readable_name' : 'No accesses',
@@ -543,8 +546,10 @@
     }
 
     function processAccesses() {
+        // console.log('processAccesses');
         $('#capir_report_status').text('Processing user access data...');
         for (var i = controls.accessIndex; i < accessData.length; i++) {
+            progressbar(i, accessData.length);
             var thisAccess = accessData[i];
             var userID = thisAccess.user_id;
             var thisEnrollment = enrollmentData[getEnrollmentID(userID)];
@@ -554,8 +559,8 @@
                     thisAccess.total_activity_time = thisEnrollment.total_activity_time;
                 } else if (controls.rptType == 'at-risk' || controls.rptType == 'instructor') {
                     var regex = RegExp('(.jpg|.png|.svg|.mp(3|4|g))$'); // filter out media files from count of resource views
-                    var result = regex.test(thisAccess.readable_name);
-                    if (!result) {thisEnrollment.page_views += thisAccess.view_score} // not media, so add to resource views
+                    var mediaFile = regex.test(thisAccess.readable_name);
+                    if (!mediaFile) {thisEnrollment.page_views += thisAccess.view_score} // not media, so add to resource views
                     if (thisAccess.readable_name == 'Course Home') {thisEnrollment.home_page_views = thisAccess.view_score}
                     if (controls.rptDateStart > 0) {
                         var thisLastAccess = new Date(thisAccess.last_access);
@@ -569,7 +574,7 @@
                 thisAccess.user_role = 'Unenrolled';
             }
             accessData[i] = thisAccess;
-            addCourseData(accessData[i]);
+            if (controls.rptType == 'access') {addCourseData(accessData[i])}
         }
         controls.accessIndex = i;
         if (controls.rptType == 'access') {
@@ -578,6 +583,7 @@
     }
 
     function getAccesses(aURL) {
+        // console.log('getAccesses');
         $('#capir_report_status').text('Getting user access data...');
         if (controls.aborted) {
             console.log('Aborted at getAccesses()');
@@ -622,38 +628,48 @@
     // This function will anonymize the user list to protect student privacy
     // By randomizing first and last names seperately, a large number of student names can be randomly generated with minimal chance of duplication
     // First names are colors and last names are fruits, vegetables, spices, etc
-    function anonStdnts() {
-    var firstNames =
-        ['Alabaster','Almond','Arylide','Ash','Beige','Bistre','Black','Bleu','Blizzard','Blood','Blue','Brass','Brick','Bronze','Brown','Cadmium','Cafe Au Lait','Canary','Carmine','Carnation','Cedar','Cerise','Cerulean','Champagne','Chartreuse','Chocolate','Chrome','Cinnamon','Cobalt','Cocoa','Coffee','Copper','Coral','Cornflower','Cotton','Cyan','Denim','Ecru','Emerald','Fallow','Falu','Fern','Flax','Forest','Fuchsia','Fulvous','Goldenrod','Gray','Green','Indigo','Khaki','Latte','Lava','Lavender','Lilac','Magenta','Maroon','Mauve','Olive','Opal','Orange','Pink','Purple','Raspberry','Red','Rose','Ruby','Saffron','Salmon','Sand','Sapphire','Satin','Sienna','Tangerine','Taupe','Turquoise','Umber','Vermillion','Violet','White','Yellow'
-        ];
-    var lastNames =
-        ['Acorn','Alfalfa','Amrud','Anise','Artichoke','Arugula','Asparagus','Aubergine','Avacado','Azuki','Banana','Basil','Bean','Beet','Bok Choy','Borlotti','Broccoli','Cabbage','Caraway','Carrot','Cauliflower','Celeriac','Celery','Chamomile','Chard','Chestnut','Chickpea','Chive','Cilantro','Collard Green','Coriander','Cucumber','Daikon','Delicata','Dill','Eggplant','Endive','Fennel','Frisee','Garbanzo','Garlic','Ginger','Habanero','Horseradish','Jalapeño','Jicama','Kale','Kohlrabi','Lavender','Leek','Lemon','Lemon Grass','Lentils','Lettuce','Lima Bean','Mangel-Wurzel','Mangetout','Marjoram','Melon','Mushroom','Mustard','Nettles','Okra','Onion','Oregano','Paprika','Parsley','Parsnip','Pea','Pepper','Potato','Pumpkin','Quandong','Quinoa','Radicchio','Radish','Rhubarb','Rosemary','Rutabaga','Sage','Salsify','Scallion','Shallot','Skirret','Soy','Spinach','Sprout','Squash','Sunchoke','Sugar','Sweetcorn','Taro','Tat','Tat Soi','Thyme','Tomato','Topinambur','Turnip','Wasabi'
-        ];
-    var firstNamesLen = firstNames.length;
-    var lastNamesLen = lastNames.length;
+    function anonymizeStudents(userID) {
+        // console.log('anonymizeStudents');
+        var firstNames =
+            ['Alabaster','Almond','Arylide','Ash','Beige','Bistre','Black','Bleu','Blizzard','Blood','Blue','Brass','Brick','Bronze','Brown','Cadmium','Cafe Au Lait','Canary','Carmine','Carnation','Cedar','Cerise','Cerulean','Champagne','Chartreuse','Chocolate','Chrome','Cinnamon','Cobalt','Cocoa','Coffee','Copper','Coral','Cornflower','Cotton','Cyan','Denim','Ecru','Emerald','Fallow','Falu','Fern','Flax','Forest','Fuchsia','Fulvous','Goldenrod','Gray','Green','Indigo','Khaki','Latte','Lava','Lavender','Lilac','Magenta','Maroon','Mauve','Olive','Opal','Orange','Pink','Purple','Raspberry','Red','Rose','Ruby','Saffron','Salmon','Sand','Sapphire','Satin','Sienna','Tangerine','Taupe','Turquoise','Umber','Vermillion','Violet','White','Yellow'
+            ];
+        var lastNames =
+            ['Acorn','Alfalfa','Amrud','Anise','Artichoke','Arugula','Asparagus','Aubergine','Avacado','Azuki','Banana','Basil','Bean','Beet','Bok Choy','Borlotti','Broccoli','Cabbage','Caraway','Carrot','Cauliflower','Celeriac','Celery','Chamomile','Chard','Chestnut','Chickpea','Chive','Cilantro','Collard Green','Coriander','Cucumber','Daikon','Delicata','Dill','Eggplant','Endive','Fennel','Frisee','Garbanzo','Garlic','Ginger','Habanero','Horseradish','Jalapeño','Jicama','Kale','Kohlrabi','Lavender','Leek','Lemon','Lemon Grass','Lentils','Lettuce','Lima Bean','Mangel-Wurzel','Mangetout','Marjoram','Melon','Mushroom','Mustard','Nettles','Okra','Onion','Oregano','Paprika','Parsley','Parsnip','Pea','Pepper','Potato','Pumpkin','Quandong','Quinoa','Radicchio','Radish','Rhubarb','Rosemary','Rutabaga','Sage','Salsify','Scallion','Shallot','Skirret','Soy','Spinach','Sprout','Squash','Sunchoke','Sugar','Sweetcorn','Taro','Tat','Tat Soi','Thyme','Tomato','Topinambur','Turnip','Wasabi'
+            ];
+        var firstNamesLen = firstNames.length;
+        var lastNamesLen = lastNames.length;
+        var names = [];
+        var firstNameIdx = Math.floor(Math.random() * firstNamesLen);
+        var lastNameIdx = Math.floor(Math.random() * lastNamesLen);
+        names.push(firstNames[firstNameIdx]);
+        names.push(lastNames[lastNameIdx]);
+        var name = names.join(' ');
+        userData[userID].anon_name = name;
+    }
+
+    function batchAnonymizeStudents() {
+        // console.log('batchAnonymizeStudents');
         for (var id in enrollmentData) {
             if (enrollmentData.hasOwnProperty(id)) {
                 var userID = enrollmentData[id].user_id;
                 // Do not anonymize the names of instructors, TAs or support. Do not give a new anonymized name to a student who has one.
-                if (enrollmentData[id].role !== 'Student' || ((typeof userData[userID] == 'undefined' || userData[userID].anon_name))) {
+                if ((enrollmentData[id].role !== 'Student') || ((typeof userData[userID] == 'undefined' || userData[userID].anon_name))) {
                     continue;
                 }
-                var names = [];
-                var firstNameIdx = Math.floor(Math.random() * firstNamesLen);
-                var lastNameIdx = Math.floor(Math.random() * lastNamesLen);
-                names.push(firstNames[firstNameIdx]);
-                names.push(lastNames[lastNameIdx]);
-                var name = names.join(' ');
-                userData[userID].anon_name = name;
+                anonymizeStudents(userID)
             }
         }
     }
 
     function processEnrollments() {
-        $('#capir_report_status').text('Processing user access data...');
-        progressbar(4, 10);
+        // console.log('processEnrollments');
+        var c = 0;
+        var objectLength = Object.keys(enrollmentData).length;
+        $('#capir_report_status').text('Processing enrollment data...');
         var thisUserRole, nextFunction;
         for (var id in enrollmentData) {
+            progressbar(++c, objectLength);
+            //console.log(c + ', ' + objectLength);
             var thisEnrollment = enrollmentData[id];
             thisUserRole = thisEnrollment.role;
             thisUserRole = thisUserRole.replace(/Enrollment/i,""); // Delete 'Enrollment' from role
@@ -689,19 +705,19 @@
         tchrEmailArray = [];
         tchrNameArray = [];
         if (controls.anonStdnts) {
-            anonStdnts();
+            batchAnonymizeStudents();
         }
         controller('enrollments_done');
     }
 
     // Get enrollment data for users that is course-specific
     function getEnrollments() {
+        // console.log('getEnrollments');
         $('#capir_report_status').text('Getting enrollments data...');
         if (controls.aborted) {
             console.log('Aborted at getEnrollments()');
             return false;
         }
-        progressbar(3, 10);
         try {
 
             var eURL = '/api/v1/courses/' + currCourse.course_id + '/enrollments?per_page=100';
@@ -709,6 +725,7 @@
             $.getJSON(eURL, function(edata, status, jqXHR) {
                 if (edata) {
                     for (var i = 0; i < edata.length; i++) {
+                        progressbar(i, edata.length);
                         var thisEnrollment = edata[i];
                         enrollmentData[edata[i].id] = thisEnrollment;
                     }
@@ -727,16 +744,17 @@
 
     // Get the user data that is not course-specific
     function getUsers(uURL) {
+        // console.log('getUsers');
         $('#capir_report_status').text('Getting users data...');
         if (controls.aborted) {
             console.log('Aborted at getUsers()');
             return false;
         }
-        progressbar(2, 10);
         try {
             $.getJSON(uURL, function(udata, status, jqXHR) { // Get users for the current course
                 uURL = nextURL(jqXHR.getResponseHeader('Link')); // Get next page of results, if any
                 for (var i = 0; i < udata.length; i++) {
+                    progressbar(i, udata.length);
                     var thisUser = udata[i];
                     userData[thisUser.id] = thisUser;
                     controls.userArray.push(thisUser.id);
@@ -758,12 +776,12 @@
 
     // Get course data one time to be applied to all users of the current course
     function getCourseData(crsID) {
+        // console.log('getCourseData');
         $('#capir_report_status').text('Getting course data...');
         if (controls.aborted) {
             console.log('Aborted at getCourseData()');
             return false;
         }
-        progressbar(1,10); // Reset progress bar
         try {
             $('#capir_report_status').text('Getting course data...');
             var urlCrs = '/api/v1/courses/' + crsID + '?include[]=total_students';
@@ -820,9 +838,10 @@
     }
 
     function makeNewReport() {
+        // console.log('makeNewReport');
         var currCourseID;
         try {
-            if (!controls.combinedRpt) { // Clear userData object if outputting a separate report for each course
+            if (!controls.combinedRpt) { // Clear userData object if outputting a seperate report for each course
                 Object.keys(userData).forEach(function(key) { delete userData[key]; });
                 accessData = [];
                 atRiskArray = [];
@@ -830,7 +849,6 @@
                 controls.accessCount = 0;
             }
             // Clear course-specific data from objects for single or multiple reports
-
             Object.keys(currCourse).forEach(function(key) { delete currCourse[key]; });
             Object.keys(enrollmentData).forEach(function(key) { delete enrollmentData[key]; });
             Object.keys(assignmentData).forEach(function(key) { delete assignmentData[key]; });
@@ -839,16 +857,16 @@
             if (controls.rptType == 'instructor') {
                 topics = [];
                 topicEntries = [];
-
                 topicIDs = [];
-                topicsIdx = 0;
+                controls.topicsIdx = 0;
             }
-            if (controls.rptType == 'at-risk' || controls.rptType == 'instructor') {accessData = []}
+            if (controls.rptType == 'at-risk' || controls.rptType == 'instructor') {
+                accessData = [];
+                controls.accessIndex = 0;
+            }
             submissionData = [];
             controls.userIndex = -1;
             controls.userArray = [];
-            //accessData = [];
-            controls.accessIndex = 0;
             if (controls.coursePending === 0) { // Output report if no more reports are pending
                 outputReport();
             }
@@ -865,6 +883,7 @@
     // Get the Canvas course IDs that match the user's search criteria
 
     function getCourseIds(crsURL) {
+        // console.log('getCourseIds');
         if (controls.aborted) {
             console.log('Aborted at getCourseIds()');
             return false;
@@ -903,7 +922,8 @@
                         wrapup();
                         return false;
                     }
-                    var runScriptDlg = 'The records from ' + controls.coursePending + ' course(s) will be processed. Continue?';
+                    var pluralCrs = controls.coursePending > 1 ? 's' : '';
+                    var runScriptDlg = 'The records from ' + controls.coursePending + ' course' + pluralCrs + ' will be processed. Continue?';
                     if (confirm(runScriptDlg) == true) {
                         progressbar(); // Display progress bar
                         makeNewReport(); // Get user accesses for each course selected
@@ -923,6 +943,7 @@
     // Processes user input from the report options dialog
 
     function setupReports(enrllTrm, srchBy, srchTrm) {
+        // console.log('setupReports');
         var enrollTermID = (enrllTrm > 0) ? "&enrollment_term_id=" + enrllTrm : "";
         var searchBy = (srchBy == 'true') ? "" : "&search_by=teacher";
         var searchTrm = (srchTrm.length > 0) ? "&search_term=" + srchTrm : "";
@@ -937,6 +958,7 @@
     // Report file generating functions below
 
     function outputReport() {
+        // console.log('outputReport');
         var reportName = '';
         var rptDatesClean, rptDatesConcat;
         try {
@@ -979,6 +1001,7 @@
     }
 
     function createCSV() {
+        // console.log('createCSV');
         var tatHrs;
         var fields
         if (controls.rptType == 'at-risk' || controls.rptType == 'participation') {
@@ -1105,11 +1128,11 @@
                 'src' : 'e.feedback_mean_length',
                 'fmt' : 'integer',
             }, {
-                'name' : 'Quarter',
-                'src' : 'a.quarter_name',
-            }, {
                 'name' : 'Enrollment',
                 'src' : 'a.ttl_stdnts',
+            }, {
+                'name' : 'Quarter',
+                'src' : 'a.quarter_name',
             }, {
                 'name' : 'Section',
                 'src' : 'a.section',
@@ -1403,6 +1426,7 @@
 
     // Clear or reset objects, arrays and vars of all data, reset UI
     function wrapup() {
+        // console.log('wrapup');
         if ($('#capir_progress_dialog').dialog('isOpen')) {
             $('#capir_progress_dialog').dialog('close');
         }
@@ -1428,7 +1452,7 @@
         controls.rptDateStartTxt = '';
         controls.rptDateEndTxt = '';
         document.body.style.cursor = "default"; // Restore default cursor
-        $('#capir_access_report').one('click', reportOptionsDlg); // Re-enable multi-reports button
+        $('#capir_access_report').one('click', reportOptionsDlg); // Re-enable Canvas API Reports button
         if (controls.emptyCourse) {
             alert('Courses labeled as cancelled (SECX##) and those with no students enrolled have been omitted. See Console for a list of omitted courses.');
         }
@@ -1713,9 +1737,9 @@
                             $('#capir_access_report').one('click', reportOptionsDlg);
                         }
                     }});
-                $('.ui-dialog-titlebar-close').remove(); // Remove titlebar close button forcing users to form buttons
+                $('.ui-dialog-titlebar-close').remove(); // Remove titlebar close button forcing users to use form buttons
                 $('#capir_term_slct').closest(".ui-dialog").find("button:contains('OK')").prop("disabled", true).addClass("ui-state-disabled");
-                if ($('#capir_term_slct').children('option').length === 0) { // add terms to terms select element
+                if ($('#capir_term_slct').children('option').length === 0) { // add quarters and terms to terms select element
                     $.each(terms.data, function (key, value) {
                         $("#capir_term_slct").append($('<option>', {
                             value: value.val,
