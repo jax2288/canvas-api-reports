@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Canvas API Reports
 // @namespace    https://github.com/djm60546/canvas-api-reports
-// @version      1.4
+// @version      1.5
 // @description  Script for extracting student and instructor performance data using the Canvas API. Generates a .CSV download containing the data. Based on the Access Report Data script by James Jones.
 // @author       Dan Murphy, Northwestern University School of Professional Studies (dmurphy@northwestern.edu)
 // @match        https://canvas.northwestern.edu/accounts/*
@@ -182,6 +182,7 @@
                 } else {
                     sURL = 'https://canvas.northwestern.edu/api/v1/courses/' + currCourse.course_id + '/students/submissions?student_ids[]=all&per_page=100';
                     sURL += controls.rptType == 'instructor' ? '&include[]=submission_comments' : '';
+                    progressbar(0,0);
                     getSubmissions(sURL);
                 }
                 break;
@@ -189,7 +190,7 @@
                 if (controls.userIndex >= controls.userArray.length) {
                     processAccesses();
                 } else {
-                    progressbar(controls.userIndex,controls.userArray.length);
+                    progressbar(controls.userIndex, controls.userArray.length);
                     aURL = '/courses/' + currCourse.course_id + '/users/' + controls.userArray[controls.userIndex] + '/usage.json?per_page=100';
                     getAccesses(aURL);
                 }
@@ -198,10 +199,6 @@
                 sURL = 'https://canvas.northwestern.edu/api/v1/courses/' + currCourse.course_id + '/students/submissions?student_ids[]=all&per_page=100';
                 sURL += controls.rptType == 'instructor' ? '&include[]=submission_comments' : '';
                 getSubmissions(sURL);
-                break;
-            case 'topics':
-                var tURL = '/api/v1/courses/' + currCourse.course_id + '/discussion_topics?per_page=100';
-                getTopics(tURL);
                 break;
             case 'topic_entries':
                 if (controls.topicsIdx >= topicIDs.length) {
@@ -228,8 +225,12 @@
     function processTopicEntries() {
         // console.log('processTopicEntries');
          $('#capir_report_status').text('Processing discussion topic entries...');
+        if (controls.aborted) {
+            console.log('Aborted at processTopicEntries()');
+            return false;
+        }
         for (var i = 0; i < topicEntries.length; i++) {
-            progressbar(i, topicEntries.length);
+            progressbar(i,topicEntries.length);
             var thisEntry = topicEntries[i];
             var userID = thisEntry.user_id
             var thisEnrollment = enrollmentData[getEnrollmentID(userID)];
@@ -297,8 +298,12 @@
     // Get the list of discussion topics for the current couurse
 
     function getTopics(tURL) {
-         // console.log('getTopics');
+        // console.log('getTopics');
         $('#capir_report_status').text('Getting discussion topics...');
+        if (controls.aborted) {
+            console.log('Aborted at getTopics()');
+            return false;
+        }
         if (controls.aborted) {
             console.log('Aborted at getTopics()');
             return false;
@@ -308,7 +313,7 @@
                 tURL = nextURL(jqXHR.getResponseHeader('Link')); // Get next page of results, if any
                 if (tData) {
                     for (var i = 0; i < tData.length; i++) {
-                        progressbar(i, tData.length);
+                        progressbar(i,tData.length);
                         var thisTopic = tData[i];
                         topics[thisTopic.id] = thisTopic;
                         topicIDs.push(thisTopic.id);
@@ -332,6 +337,10 @@
     function processGrading() {
         // console.log('processGrading');
         $('#capir_report_status').text('Totaling scores and late/missing assignments...');
+        if (controls.aborted) {
+            console.log('Aborted at processGrading()');
+            return false;
+        }
         var feedbackLen = 0;
         for (var i = 0; i < submissionData.length; i++) {
             progressbar(i, submissionData.length);
@@ -371,7 +380,8 @@
         var gradedOntimePcnt = Math.round((currCourse.submissions_graded_ontime / currCourse.submissions_count) * 100, 2);
         currCourse.graded_ontime_pcnt = gradedOntimePcnt;
         currCourse.feedback_mean_length = currCourse.feedback_count > 0 ? Math.round(feedbackLen / currCourse.feedback_count, 0) : 0;
-        controller('topics');
+        var tURL = '/api/v1/courses/' + currCourse.course_id + '/discussion_topics?per_page=100';
+        getTopics(tURL);
     }
 
     // Make At-risk list based on the status and quantity students' sumbmissions, discussion posts and current score
@@ -449,6 +459,7 @@
 
     function getAssignments(dURL) {
         // console.log('getAssignments');
+        $('#capir_report_status').text('Getting assignments data...');
         if (controls.aborted) {
             console.log('Aborted at getAssignments()');
             return false;
@@ -456,7 +467,7 @@
         var discussions = 0;
         var assignments = 0;
         try {
-            $('#capir_report_status').text('Getting assignments data...');
+
             $.getJSON(dURL, function(ddata, status, jqXHR) { // Get assignments for the current course
                 dURL = nextURL(jqXHR.getResponseHeader('Link')); // Get next page or results, if any
                 for (var i = 0; i < ddata.length; i++) {
@@ -496,7 +507,7 @@
     }
 
     function getSubmissions(sURL) {
-         // console.log('getSubmissions');
+        // console.log('getSubmissions');
         $('#capir_report_status').text('Getting submissions data...');
         if (controls.aborted) {
             console.log('Aborted at getSubmissions()');
@@ -506,12 +517,12 @@
             $.getJSON(sURL, function(sdata, status, jqXHR) {
                 sURL = nextURL(jqXHR.getResponseHeader('Link')); // Generate next page URL if more than 100 access records returned
                 for (var i = 0; i < sdata.length; i++) {
-                    progressbar(i, sdata.length);
                     submissionData.push(sdata[i]);
                 }
             }).done(function() {
                 if (sURL) {
                     getSubmissions(sURL);
+                    progressbar(5, 10);
                 } else {
                     var dURL = '/api/v1/courses/' + currCourse.course_id + '/assignments?per_page=100';
                     getAssignments(dURL);
@@ -528,7 +539,7 @@
     }
 
     function writeNoAccesses(obj) {
-        console.log('writeNoAccesses');
+        // console.log('writeNoAccesses');
         var nonAccess = {
             'role' : obj.role,
             'readable_name' : 'No accesses',
@@ -548,8 +559,13 @@
     function processAccesses() {
         // console.log('processAccesses');
         $('#capir_report_status').text('Processing user access data...');
+        if (controls.aborted) {
+            console.log('Aborted at processAccesses()');
+            return false;
+        }
+        var arrayLen = accessData.length;
         for (var i = controls.accessIndex; i < accessData.length; i++) {
-            progressbar(i, accessData.length);
+            progressbar(i, arrayLen);
             var thisAccess = accessData[i];
             var userID = thisAccess.user_id;
             var thisEnrollment = enrollmentData[getEnrollmentID(userID)];
@@ -649,6 +665,10 @@
 
     function batchAnonymizeStudents() {
         // console.log('batchAnonymizeStudents');
+        if (controls.aborted) {
+            console.log('Aborted at batchAnonymizeStudents()');
+            return false;
+        }
         for (var id in enrollmentData) {
             if (enrollmentData.hasOwnProperty(id)) {
                 var userID = enrollmentData[id].user_id;
@@ -663,13 +683,16 @@
 
     function processEnrollments() {
         // console.log('processEnrollments');
+        if (controls.aborted) {
+            console.log('Aborted at processEnrollments()');
+            return false;
+        }
         var c = 0;
         var objectLength = Object.keys(enrollmentData).length;
         $('#capir_report_status').text('Processing enrollment data...');
         var thisUserRole, nextFunction;
         for (var id in enrollmentData) {
             progressbar(++c, objectLength);
-            //console.log(c + ', ' + objectLength);
             var thisEnrollment = enrollmentData[id];
             thisUserRole = thisEnrollment.role;
             thisUserRole = thisUserRole.replace(/Enrollment/i,""); // Delete 'Enrollment' from role
@@ -883,11 +906,6 @@
     // Get the Canvas course IDs that match the user's search criteria
 
     function getCourseIds(crsURL) {
-        // console.log('getCourseIds');
-        if (controls.aborted) {
-            console.log('Aborted at getCourseIds()');
-            return false;
-        }
         try {
             $.getJSON(crsURL, function(cdata, status, jqXHR) {
                 crsURL = nextURL(jqXHR.getResponseHeader('Link'));
@@ -1458,7 +1476,7 @@
         }
     }
 
-    function progressbar(total, current) {
+    function progressbar(current, total) {
         try {
             if (typeof total === 'undefined' || typeof current == 'undefined') {
                 if ($('#capir_progress_dialog').length === 0) {
@@ -1491,7 +1509,8 @@
                 }
             } else {
                 if (!controls.aborted) {
-                    var val = current > 0 ? Math.round(100 * total / current) : false;
+                    // console.log(current + '/' + total);
+                    var val = current > 0 ? Math.round(100 * current / total) : false;
                     $('#capir_progressbar').progressbar('option', 'value', val);
                 }
             }
