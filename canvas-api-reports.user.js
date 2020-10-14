@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Canvas API Reports
 // @namespace    https://github.com/djm60546/canvas-api-reports
-// @version      1.5
+// @version      1.51
 // @description  Script for extracting student and instructor performance data using the Canvas API. Generates a .CSV download containing the data. Based on the Access Report Data script by James Jones.
 // @author       Dan Murphy, Northwestern University School of Professional Studies (dmurphy@northwestern.edu)
 // @match        https://canvas.northwestern.edu/accounts/*
@@ -915,13 +915,15 @@
                         var goodURL = true;
                         var crsNameStr = thisCourse.course_code;
                         var dlPttrn = /-DL_/;
+                        var crsAvlbl = false;
                         var dlStatus = dlPttrn.test(crsNameStr); // Check if a course is online by the -DL_ pattern in link text
-                        if ((controls.dlCrsOnly && dlStatus) || !controls.dlCrsOnly) { // Add courses to the list; either online only or all
+                        if ((controls.dlCrsOnly && dlStatus) || !controls.dlCrsOnly) { // Filter courses for the list; either online only or all -- depending on settings
+                            if (thisCourse.workflow_state == 'available' ) {crsAvlbl = true}; // Check if current course is published
                             var cncldPttrn = /_SECX\d\d/;
                             var cncldStatus = cncldPttrn.test(crsNameStr); // Check if current course is cancelled with "_SECX[two digits]" in the course name
                             var sndbxPttrn = /^CCS_/;
                             var sndbxStatus = sndbxPttrn.test(crsNameStr); // Check if current course is a sandbox with a name starting with "CCS_"
-                            if (cncldStatus || sndbxStatus) {continue} // Do not include cancelled or sandbox courses
+                            if (cncldStatus || sndbxStatus || !crsAvlbl) {continue} // Do not include cancelled, unavailable (unpublished) or sandbox courses
                             controls.courseArray.push(thisCourse.id);
                             if (cncldStatus) {
                                 console.log(thisCourse.name + ' - Cancelled');
