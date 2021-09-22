@@ -4,7 +4,7 @@
 // @version      1.52
 // @description  Script for extracting student and instructor performance data using the Canvas API. Generates a .CSV download containing the data. Based on the Access Report Data script by James Jones.
 // @author       Dan Murphy, Northwestern University School of Professional Studies (dmurphy@northwestern.edu)
-// @match        https://canvas.northwestern.edu/accounts/*
+// @match        https://exedprograms.kellogg.northwestern.edu/*
 // @require      https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/1.3.3/FileSaver.js
 // @require      https://code.jquery.com/jquery-3.4.1.js
 // @require      https://code.jquery.com/ui/1.12.1/jquery-ui.js
@@ -46,7 +46,7 @@
     controls.accessIndex = 0;
     controls.anonStdnts = true; // Anonymize student names and IDs
     controls.combinedRpt; // Make one report for all selected courses
-    controls.canvasAcct = "21"; // SPS Canvas sub-account number
+    controls.canvasAcct = "80"; // Online Canvas sub-account number
     controls.courseArray = [];
     controls.courseIndex = 0
     controls.coursePending = -1;
